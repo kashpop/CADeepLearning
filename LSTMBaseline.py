@@ -107,7 +107,7 @@ output_b = model.add_parameters((NUM_OF_CLASSES))
 ## RUN LSTM FOR EACH DOCUMENT
 for related_articles,cred_label in zip(trainData, trainLabels):
 	for article in related_articles:
-		## RENEW COMPUTATION GRAPH ---- NEED TO CHECK THE IMPACT OF HAVING IT HEAR
+		## RENEW COMPUTATION GRAPH ---- NEED TO CHECK THE IMPACT OF HAVING IT HERE
 		dn.renew_cg()
 		expressionSequence = []
 
