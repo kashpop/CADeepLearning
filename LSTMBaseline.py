@@ -1,90 +1,182 @@
-import json, os, nltk
+import json, os, pickle
 import numpy as np
-import dynet as dn
-from gensim.models.keyedvectors import KeyedVectors
+from numpy import mean, argmax
+import _dynet as dn
+#from gensim.models.keyedvectors import KeyedVectors
+
+dyparams = dn.DynetParams()
+dyparams.set_mem(12000)
+dyparams.set_random_seed(666)
+dyparams.init()
+
+np.random.seed(7)
 
 word2VecFile = "/GW/D5data-1/kpopat/SnopesDeepLearning/resources/gloveWiki6B/word2vec.6B.300d.txt"
-JSONFiles = "/GW/D5data-1/kpopat/SnopesDeepLearning/resources/test"
+#JSONFiles = "/GW/D5data-1/kpopat/SnopesDeepLearning/resources/Snopes+Web_json"
+dataPklFiles = "/GW/D5data-1/kpopat/SnopesDeepLearning/resources/Snopes+Web_pickle"
+#dataPklFiles = "/GW/D5data-1/kpopat/SnopesDeepLearning/resources/test"
 
-missingWordFilePath = "/GW/D5data-1/kpopat/SnopesDeepLearning/Workspace/missing_word.txt"
-
-missingWordFile = open(missingWordFilePath,"w") 
-missingWords = set()
+#missingWordFilePath = "/GW/D5data-1/kpopat/SnopesDeepLearning/Workspace/missing_word.txt"
 
 vocab = {}
 vectors = []
 
 def prepareEmbeddings(vectorFile):
+	print("Loading Embeddings")
 	with open(word2VecFile) as f:
 		f.readline()
 		for i, line in enumerate(f):
 			fields = line.strip().split(" ")
 			vocab[fields[0]] = i
 			vectors.append(list(map(float, fields[1:])))
+	print("Embeddings Loaded!")
 
 
-def prepare_dataset(path_to_folder):
-	trainData = []
-	trainLabels = []
+def get_probs(related_articles):
+	
+	input_vector_dense_layer = dn.vecInput(30*STATE_SIZE)
+	
+	output_vector_list = []
+	## RUN LSTM FOR EACH DOCUMENT
+	
+	dn.renew_cg()
+	
+	for article in related_articles[:30]:
+		## RENEW COMPUTATION GRAPH ---- NEED TO CHECK THE IMPACT OF HAVING IT HERE
+		
+		expressionSequence = []
+		
+		## GET THE EXPRESSION SEQUENCE FOR THE ARTICLE
+		for word in article:
+			expressionSequence.append(input_lookup[word])
+		
+		if len(expressionSequence)==0:
+			continue
+		##INITIALIZE STATE FOR LSTM
+		state = lstm.initial_state()
+		
+		## GET THE FINAL OUTPUT VECTOR OF LENGTH STATE_SIZE 
+		output_vec = state.transduce(expressionSequence)[-1]
+		#print(output_vec.value()
+		
+		output_vector_list.append(output_vec)
+	
+	#pad the input to dense layers if the number of articles are <30
+	if(len(output_vector_list)<30):
+		for i in range(30-len(output_vector_list)):
+			output_vector_list.append(dn.vecInput(STATE_SIZE))
+		
+	#concatenate LSTM output of all the documents
+	input_vector_dense_layer = dn.concatenate(output_vector_list)
+	
+	w = dn.parameter(w1)
+	b = dn.parameter(b1)
+	#Run through dense layer
+	output_hl_1 = dn.tanh((w*input_vector_dense_layer)+b)
+	
+	w = dn.parameter(w2)
+	b = dn.parameter(b2)
+	#Run through dense layer
+	output_hl_2 = dn.logistic((w*output_hl_1)+b)
+	
+	w = dn.parameter(output_w)
+	b = dn.parameter(output_b)
+	#Run through softmax layer
+	output_scores = dn.softmax(w*output_hl_2+b)
+	
+	return output_scores
+	
+
+def train():
+	trainer = dn.AdamTrainer(model)
+	print("Training started")
+	
+	
 	#iterate over all json file -- one json per claim
-	for jsonFileName in os.listdir(path_to_folder):
-		if not jsonFileName.endswith(".json"): 
+	for pklFileName in os.listdir(dataPklFiles):
+		if not pklFileName.endswith(".p"): 
 			continue
 		else:
 			#load the json file
-			with open(os.path.join(path_to_folder, jsonFileName)) as jsonFile:
-				jsonData = json.load(jsonFile)
+			articles,cred_label = pickle.load(open(os.path.join(dataPklFiles, pklFileName),'rb'))
 			
-			print("Processing: "+jsonData["Claim_ID"])
-			trainLabels.append(jsonData["Credibility"])
-	
-			docVectorCollection = []
+			print("Processing: "+pklFileName)
+				    
+			print("\tNumber of documents",len(articles))			
 			
-			#for each search result page in json
-			for searchPage in jsonData["Google Results"]:
-				
-				#for each search result document in the search page
-				for searchResult in searchPage["results"]:
-					
-					#read the document text and convert it to small case
-					docText = searchResult["doc_text"]
-					
-					#skip the empty documents and snopes web pages
-					if docText == "" or searchResult["domain"] == "www.snopes.com":
-						continue
-					
-					docText = docText.lower()
-					docVector = []
-	  
-					#for each word in the document get the pretrained embedding vectors
-					for word in nltk.word_tokenize(docText):
-						if word in vocab:
-							docVector.append(vocab[word])
-						else:
-							missingWords.add(word)
-	    
-					docVectorCollection.append(docVector)
-	    
-			print("\tAdding {} documents".format(len(docVectorCollection)))			
-			trainData.append(docVectorCollection)
+			print("\tTraining using this instance")		
+			
+			probs = get_probs(articles)
+			#print(probs.value())
+			loss = dn.pickneglogsoftmax(probs, cred_label)
+			loss_val = loss.value()
+			
+			print("\tLoss: ",loss_val)
+			loss.backward()
+			trainer.update()
+			
+	print("Training done")
+
 	
-	#dump missing words
-	for missedWord in missingWords:
-		missingWordFile.write(missedWord+"\n")
-	missingWordFile.close()
+def validate():
+	print('starting validation')
+	acc = []
+	false_acc = []
+	true_acc = []
+	num_true = 0
+	num_false = 0
+	num_claims = 0
 	
-	return trainData, trainLabels
+	
+	for pklFileName in os.listdir(dataPklFiles):
+		if not pklFileName.endswith(".p"): 
+			continue
+		else:
+			#load the json file
+			articles,cred_label = pickle.load(open(os.path.join(dataPklFiles, pklFileName),'rb'))
+			
+			#print("Evaluating: "+pklFileName)
+				    
+			#print("\tNumber of documents",len(articles))			
+			
+			#print("\tTraining using this instance")		
+			
+			probs = get_probs(articles).npvalue()
+			num_claims = num_claims + 1
+			
+			if cred_label == np.argmax(probs):
+				acc.append(1)
+				if cred_label == 1:
+					false_acc.append(1)
+					num_false = num_false + 1
+				else:
+					true_acc.append(1)
+					num_true = num_true + 1
+			else:
+				acc.append(0)
+				if cred_label == 1:
+					false_acc.append(0)
+					num_false = num_false + 1
+				else:
+					true_acc.append(0)
+					num_true = num_true + 1
+			
+	#print(acc)
+	print("++++++++++Results+++++++++++")
+	print("Number of Claims: ", num_claims)
+	print("Number of True Claims: ", num_true)
+	print("Number of False Claims: ", num_false)
+	
+	print('accuracy: ', mean(acc))
+	print('false class accuracy: ', mean(false_acc))
+	print('true class accuracy: ', mean(true_acc))
 
 
-print("Loading Embeddings")
 prepareEmbeddings(word2VecFile)
-print("Embeddings Loaded!")
 
-print("Preparing data")	
-trainData, trainLabels = prepare_dataset(JSONFiles)
-print("Data prepared!")
+#trainData, trainLabels = prepare_dataset(JSONFiles)
 
-
+print("Initializing Model")
 ## DEFINE MODEL PARAMETERS
 LSTM_NUM_OF_LAYERS = 1
 STATE_SIZE = 10
@@ -92,33 +184,28 @@ EMBEDDINGS_SIZE = len(vectors[0])
 NUM_OF_CLASSES = 2
 VOCAB_SIZE = len(vectors)
 
+## DENSE LAYER PARAMS
+HIDDEN_LAYER_SIZE_1 = 20
+HIDDEN_LAYER_SIZE_2 = 10
+
 model = dn.Model()
 
 input_lookup = model.add_lookup_parameters((VOCAB_SIZE, EMBEDDINGS_SIZE))
 input_lookup.init_from_array(np.array(vectors))
 #print(input_lookup[vocab["hello"]].value())
 
-lstm = dn.LSTMBuilder(LSTM_NUM_OF_LAYERS, EMBEDDINGS_SIZE, STATE_SIZE, model)
+w1 = model.add_parameters((HIDDEN_LAYER_SIZE_1, 30*STATE_SIZE))
+b1 = model.add_parameters((HIDDEN_LAYER_SIZE_1))
 
-output_w = model.add_parameters((NUM_OF_CLASSES, STATE_SIZE))
+w2 = model.add_parameters((HIDDEN_LAYER_SIZE_2, HIDDEN_LAYER_SIZE_1))
+b2 = model.add_parameters((HIDDEN_LAYER_SIZE_2))
+
+output_w = model.add_parameters((NUM_OF_CLASSES, HIDDEN_LAYER_SIZE_2))
 output_b = model.add_parameters((NUM_OF_CLASSES))
 
+lstm = dn.LSTMBuilder(LSTM_NUM_OF_LAYERS, EMBEDDINGS_SIZE, STATE_SIZE, model)
+print("Model Initialized!")
 
-## RUN LSTM FOR EACH DOCUMENT
-for related_articles,cred_label in zip(trainData, trainLabels):
-	for article in related_articles:
-		## RENEW COMPUTATION GRAPH ---- NEED TO CHECK THE IMPACT OF HAVING IT HERE
-		dn.renew_cg()
-		expressionSequence = []
+train()
 
-		## GET THE EXPRESSION SEQUENCE FOR THE ARTICLE
-		for word in article:
-			expressionSequence.append(input_lookup[word])
-
-		##INITIALIZE STATE FOR LSTM
-		state = lstm.initial_state()
-		
-		## GET THE FINAL OUTPUT VECTOR OF LENGTH STATE_SIZE 
-		output_vec = state.transduce(expressionSequence)[-1]
-		print(output_vec.value())
-			
+validate()
