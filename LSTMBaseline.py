@@ -11,6 +11,9 @@ dyparams.init()
 
 np.random.seed(7)
 
+true_class_weight = 2.8
+false_class_weight = 1
+
 word2VecFile = "/GW/D5data-1/kpopat/SnopesDeepLearning/resources/gloveWiki6B/word2vec.6B.300d.txt"
 #JSONFiles = "/GW/D5data-1/kpopat/SnopesDeepLearning/resources/Snopes+Web_json"
 dataPklFiles = "/GW/D5data-1/kpopat/SnopesDeepLearning/resources/Snopes+Web_pickle"
@@ -108,7 +111,13 @@ def train():
 			
 			probs = get_probs(articles)
 			#print(probs.value())
-			loss = dn.pickneglogsoftmax(probs, cred_label)
+			
+			#boost the loss for true claims to handle the data imbalance
+			if cred_label == 1:
+				loss = dn.scalarInput(false_class_weight) * dn.pickneglogsoftmax(probs, cred_label)
+			else:
+				loss = dn.scalarInput(true_class_weight) * dn.pickneglogsoftmax(probs, cred_label)
+				
 			loss_val = loss.value()
 			
 			print("\tLoss: ",loss_val)
