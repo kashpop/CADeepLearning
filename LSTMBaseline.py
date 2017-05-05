@@ -80,7 +80,7 @@ def get_probs(related_articles):
 	w = dn.parameter(w2)
 	b = dn.parameter(b2)
 	#Run through dense layer
-	output_hl_2 = dn.logistic((w*output_hl_1)+b)
+	output_hl_2 = dn.tanh((w*output_hl_1)+b)
 	
 	w = dn.parameter(output_w)
 	b = dn.parameter(output_b)
@@ -195,7 +195,7 @@ VOCAB_SIZE = len(vectors)
 
 ## DENSE LAYER PARAMS
 HIDDEN_LAYER_SIZE_1 = 20
-HIDDEN_LAYER_SIZE_2 = 10
+HIDDEN_LAYER_SIZE_2 = 20
 
 model = dn.Model()
 
