@@ -1,0 +1,7 @@
+ ++++++++++Results+++++++++++
+Number of Claims:  4856
+Number of True Claims:  1249
+Number of False Claims:  3607
+accuracy:  0.806630971993
+false class accuracy:  0.929858608262
+true class accuracy:  0.450760608487
